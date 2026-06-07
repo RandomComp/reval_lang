@@ -1,0 +1,142 @@
+#ifndef REVAL_TYPES_H
+#define REVAL_TYPES_H
+
+typedef _Bool bool;
+#define true 1
+#define false 0
+#define nullptr (void*)(0)
+
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define ABS(x) ((x) < 0 ? -(x) : (x))
+
+#define PACKED __attribute__((packed))
+
+#define UNUSED __attribute__((unused))
+
+#define ALLOC __attribute__((__malloc__))
+
+#if (defined(_WIN32) || defined(_WIN64)) || (defined(__MINGW32__) || defined(__MINGW64__))
+#define IS_WIN 
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__unix__) || defined(__unix) || defined(__FreeBSD__) || defined(__ANDROID__))
+#define IS_UNIX
+#endif
+
+#if (defined(_WIN32) || defined(_WIN64) || defined(__MINGW32__) || defined(__MINGW64__))
+#define PLATFORM_NAME "Windows"
+#elif (defined(__ANDROID__))
+#define PLATFORM_NAME "Android"
+#elif (defined(__APPLE__) || defined(__MACH__))
+#define PLATFORM_NAME "MacOS"
+#elif (defined(__linux__))
+#define PLATFORM_NAME "Linux"
+#elif (defined(__unix__) || defined(__unix))
+#define PLATFORM_NAME "UNIX compatible"
+#elif (defined(_POSIX_VERSION))
+#define PLATFORM_NAME "POSIX compatible"
+#endif
+
+#if (defined(i386) || defined(__i386__) || defined(_X86_))
+#define PLATFORM_ARCH "x86-32"
+#define PLATFORM_X86_32
+#elif (defined(__x86_64__) || defined(__x86_64) || defined(_M_X64) || defined(_M_AMD64))
+#define PLATFORM_ARCH "x86-64"
+#define PLATFORM_X86_64
+#elif (defined(__arm__) || defined(__ARMEL__))
+#define PLATFORM_ARCH "arm-32"
+#define PLATFORM_ARM_32
+#elif (defined(__aarch64__))
+#define PLATFORM_ARCH "aarch-64"
+#define PLATFORM_AARCH_64
+#elif (defined(__riscv) || defined(__riscv__))
+#define PLATFORM_ARCH "risc-v"
+#define PLATFORM_RISC_V
+#endif
+
+#if (defined(__INTEL_COMPILER))
+#define PLATFORM_COMPILER_NAME "Intel compiler"
+#define PLATFORM_COMPILER_VERSION_MINOR (__INTEL_COMPILER % 100)
+#define PLATFORM_COMPILER_VERSION_MAJOR (__INTEL_COMPILER / 100)
+#define FUNCTION_SIG					__func__
+#elif (defined(__clang__))
+#define PLATFORM_COMPILER_NAME "Clang"
+#define PLATFORM_COMPILER_VERSION_MINOR __clang_minor__
+#define PLATFORM_COMPILER_VERSION_MAJOR __clang_major__
+#define FUNCTION_SIG					__PRETTY_FUNCTION__
+#elif (defined(__MINGW32__) || defined(__MINGW64__))
+#define PLATFORM_COMPILER_NAME "MinGW"
+#define PLATFORM_COMPILER_VERSION_MINOR __GNUC_MINOR__
+#define PLATFORM_COMPILER_VERSION_MAJOR __GNUC__
+#define FUNCTION_SIG					__PRETTY_FUNCTION__
+#elif (defined(__TINYC__))
+#define PLATFORM_COMPILER_NAME "TinyCC"
+#define PLATFORM_COMPILER_VERSION_MINOR (__TINYC__ % 100)
+#define PLATFORM_COMPILER_VERSION_MAJOR (__TINYC__ / 100)
+#define FUNCTION_SIG					__func__
+#elif (defined(__GNUC__) || defined(__GNUC_MINOR__) || defined(__GNUC_PATCHLEVEL__))
+#define PLATFORM_COMPILER_NAME "GCC"
+#define PLATFORM_COMPILER_VERSION_MINOR __GNUC_MINOR__
+#define PLATFORM_COMPILER_VERSION_MAJOR __GNUC__
+#define FUNCTION_SIG					__PRETTY_FUNCTION__
+#elif (defined(_MSC_VER))
+#define PLATFORM_COMPILER_NAME "MSVC"
+#define PLATFORM_COMPILER_VERSION_MAJOR (_MSC_VER / 100)
+#define PLATFORM_COMPILER_VERSION_MINOR (_MSC_VER % 100)
+#define FUNCTION_SIG					__FUNCSIG__
+#else
+#define PLATFORM_COMPILER_NAME "Unknown"
+#define PLATFORM_COMPILER_VERSION_MAJOR 0
+#define PLATFORM_COMPILER_VERSION_MINOR 0
+#define FUNCTION_SIG					__func__
+#endif
+
+#define REVAL_VER_MAJOR 0
+#define REVAL_VER_MINOR 1
+
+#define REVAL_MINIMAL_INFO "reval " PLATFORM_ARCH " %i.%i"
+
+#define REVAL_INFO "reval %i.%i -- a functional code interpreter/compiler of reval language " PLATFORM_COMPILER_NAME " %i.%i for " PLATFORM_NAME " " PLATFORM_ARCH
+
+#if defined(PLATFORM_X86_64) || defined(PLATFORM_AARCH_64)
+#define BITS_64
+#elif defined(PLATFORM_X86_32) || defined(PLATFORM_ARM_32) || defined(PLATFORM_RISC_V)
+#define BITS_32
+#endif
+
+#ifdef IS_UNIX
+#define SEPERATOR "│"
+#define PATH_DELIMETER "/"
+#else
+#define SEPERATOR "|"
+#define PATH_DELIMETER "\\"
+#endif
+
+typedef unsigned char uint8;
+typedef unsigned short uint16;
+
+typedef signed char int8;
+typedef signed short int16;
+
+#if defined(BITS_32) || defined(BITS_64)
+	typedef unsigned int uint32;
+	typedef unsigned long long uint64;
+
+	typedef signed int int32;
+	typedef signed long long int64;
+#endif
+
+#include <sys/types.h>
+
+typedef size_t word;
+
+typedef uint8 byte;
+
+typedef ssize_t _time_t;
+
+#define _STR(num) #num
+
+#define STR(num) _STR(num)
+
+#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2 * !!(condition)]))
+
+#endif

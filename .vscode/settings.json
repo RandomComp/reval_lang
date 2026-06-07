@@ -1,0 +1,12 @@
+{
+    "C_Cpp.codeAnalysis.clangTidy.enabled": false,
+    "C_Cpp.intelliSenseEngine": "disabled",
+    "clangd.arguments": [
+    "--header-insertion=never"
+    ],
+    "editor.inlayHints.enabled": "off",
+    "workbench.colorCustomizations": {
+        "editorError.foreground": "#ff0033",
+        "editorWarning.foreground": "#ffaa00"
+    },
+}
