@@ -23,8 +23,13 @@ struct tokens_t {
 
 const char* skip_spaces(const char* text);
 
+int recognize_token_len(size_t* _result, const char* c, const char** endptr);
+
+int recognize_token(token_t* _result, const char* c, const char** endptr);
+
 int tokenize(tokens_t *_result, const char *code, const char** endptr);
 
-void get_token_name(char* buf, size_t buf_size, token_t token);
+ssize_t get_token_name(char* buf, size_t buf_size, token_t token);
+ssize_t get_token_c(char* buf, size_t buf_size, token_t token);
 
 #endif

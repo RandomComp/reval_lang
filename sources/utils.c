@@ -166,6 +166,32 @@ unsigned int tohex(char c) {
 	return tolower(c) - 'a' + 10;
 }
 
+int powi(int val, int exp) {
+	if (exp == 0) return 1;
+
+	if (val == 1) return 1;
+
+	if (exp < 0) return 0;
+
+	if (exp == 1) return val;
+
+	if (val == 0) return 0;
+	
+	if (val == 2) {
+		return 1 << exp;
+	}
+
+	int result = 1;
+
+	while (exp > 0) {
+		result *= val;
+		
+		exp--;
+	}
+
+	return result;
+}
+
 void parse_bytes(const char* str, byte* _bytes, size_t* _bytes_cnt, const char** end_ptr) {
 	size_t bytes_cnt = 0;
 

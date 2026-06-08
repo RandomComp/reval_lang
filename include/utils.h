@@ -17,6 +17,8 @@ bool ishex(char c);
 
 unsigned int tohex(char c);
 
+int powi(int val, int exp);
+
 void parse_bytes(const char* str, byte* _bytes, size_t* _bytes_cnt, const char** end_ptr);
 
 int convert_byte_to_int(byte val);
