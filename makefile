@@ -54,9 +54,9 @@ BASE_CFLAGS := \
 LINK_CFLAGS := 
 
 ifeq ($(ASAN_USING), 1)
-	BASE_CFLAGS += -fsanitize=address -fsanitize=undefined -g
+	BASE_CFLAGS += -fsanitize=address -fsanitize=leak -fsanitize=undefined -g
 
-	LINK_CFLAGS += -fsanitize=address -fsanitize=undefined -g
+	LINK_CFLAGS += -fsanitize=address -fsanitize=leak -fsanitize=undefined -g
 endif
 
 ifeq ($(DEBUG), 1)

@@ -1,50 +1,60 @@
 #ifndef REVAL_PARSER_H
 #define REVAL_PARSER_H
 
+#include "errors.h"
 #include "types.h"
 
 #include "lexer_fwd.h"
 #include "parser_fwd.h"
 
-// TODO: Добавить поддержку double унифировав результат выражений eval_expresion и val
+// TODO: Добавить поддержку double и строк унифировав результат выражений eval_expresion и val
 
 struct expression_t {
-	expression_t *left, *right;
+	tokens_kind_e unary_op;
+
+	expression_t *left, *right, *center;
 
 	int val;
 
 	tokens_kind_e op;
 };
 
-typedef enum parser_err_e {
-	PARSER_ERR_POSSIBLE_UB 		= -1,
-	PARSER_ERR_OK 				= 0,
-	PARSER_ERR_UNCLOSED_PARENT 	= 1,
-	PARSER_ERR_INVALID_SYNTAX 	= 2,
-} parser_err_e;
+// typedef enum operator_assoc_e {
+// 	OP_ASSOC_LEFT,
+// 	OP_ASSOC_RIGHT,
+// } operator_assoc_e;
 
-typedef enum eval_err_e {
-	EVAL_ERR_OK 				= 0,
-	EVAL_ERR_DIVISION_BY_ZERO 	= 1,
-	EVAL_ERR_UNKNOWN_OPERATOR 	= 2
-} eval_err_e;
+// typedef enum operator_type_e {
+// 	OP_TYPE_UNARY,
+// 	OP_TYPE_BINARY,
+// 	OP_TYPE_TERNARY,
+// } operator_type_e;
 
-parser_err_e parse_compare(expression_t **_result, const token_t* tokens, const token_t** endptr);
+// typedef parser_err_e (*operator_parser_t)(expression_t *left, expression_t *center, expression_t *right);
 
-parser_err_e parse_left(expression_t **_result, const token_t* tokens, const token_t** endptr);
+// typedef struct operator_t {
+// 	tokens_kind_e kind;
+// 	operator_type_e type;
+// 	operator_assoc_e assoc;
+// 	int precedence;
 
-parser_err_e parse_mult(expression_t **_result, const token_t* tokens, const token_t** endptr);
+// 	operator_parser_t parser;
+// } operator_t;
 
-parser_err_e parse_unar(expression_t **_result, const token_t* tokens, const token_t** endptr);
+errors_t parse_ternary(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
 
-void show_expresion(expression_t* expr);
+errors_t parse_compare(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
 
-eval_err_e eval_expresion(int* result, expression_t* expr);
+errors_t parse_add(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
+
+errors_t parse_mult(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
+
+errors_t parse_unar(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
+
+size_t view_expresion(char* buf, size_t buf_size, expression_t* expr);
+
+errors_t eval_expresion(errors_t errs, int* result, expression_t* expr);
 
 void free_expresion(expression_t* expr);
-
-const char* get_parser_err_description(parser_err_e err);
-
-const char* get_eval_err_description(eval_err_e err);
 
 #endif

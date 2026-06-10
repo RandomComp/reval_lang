@@ -116,38 +116,141 @@ char* parse_cli_args(char* _str) {
 	return _str;
 }
 
-uint64 parse_num(const char* str, const char** endptr) {
+radix_e get_num_radix(const char* str) {
+	if (strncmp(str, "0o", 2) == 0) {
+		return RADIX_OCTAL;
+	}
+
+	else if (strncmp(str, "0b", 2) == 0) {
+		return RADIX_BINARY;
+	}
+
+	else if (strncmp(str, "0x", 2) == 0) {
+		return RADIX_HEXADECIMAL;
+	}
+
+	else if (str[0] == '0' && isdigit(str[1])) {
+		return RADIX_OCTAL;
+	}
+
+	return RADIX_DECIMAL;
+}
+
+const char* get_radix_name(radix_e radix) {
+	switch (radix) {
+		case RADIX_BINARY: return "binary";
+		case RADIX_OCTAL: return "octal";
+		case RADIX_DECIMAL: return "decimal";
+		case RADIX_HEXADECIMAL: return "hexadecimal";
+		default: break;
+	}
+
+	return "";
+}
+
+char* get_number_part(const char* str) {
+	if (strncmp(str, "0o", 2) == 0) {
+		str += 2;
+	}
+
+	else if (strncmp(str, "0b", 2) == 0) {
+		str += 2;
+	}
+
+	else if (strncmp(str, "0x", 2) == 0) {
+		str += 2;
+	}
+
+	else if (str[0] == '0' && isdigit(str[1])) {
+		str += 1;
+	}
+
+	return (char*)str;
+}
+
+#define ALPHABET " +-*/%><?:()=!"
+
+parse_num_err_e parse_num(uint64* result, const char* str, const char** endptr) {
 	int base = 10;
 
-	bool sign = false;
+	parse_num_err_e err = 0;
 
-	if (str[0] == '+') {
-		sign = false;
-
-		str++;
+	if (strncmp(str, "0o", 2) == 0) {
+		base = 8; str += 2;
 	}
 
-	if (str[0] == '-') {
-		sign = true;
-
-		str++;
-	}
-
-	if (str[0] == '0' && isdigit(str[1])) {
-		base = 8;
-	}
-
-	if (strncmp(str, "0b", 2) == 0) {
+	else if (strncmp(str, "0b", 2) == 0) {
 		base = 2; str += 2;
 	}
 
-	if (strncmp(str, "0x", 2) == 0) {
+	else if (strncmp(str, "0x", 2) == 0) {
 		base = 16; str += 2;
 	}
 
-	uint64 number = strtoull(str, (char**)endptr, base);
+	else if (str[0] == '0' && isdigit(str[1])) {
+		err = PARSER_NUM_ERR_LEADING_ZEROES;
 
-	return sign ? ~number + 1 : number;
+		base = 8; str += 1;
+	}
+
+	size_t expected_len = strcspn(str, ALPHABET);
+
+	const char* expected_endc = str + expected_len;
+
+	const char* src_str = str;
+
+	uint64 number = strtoull(str, (char**)(&str), base);
+
+	if (str != expected_endc) {
+		radix_e radix = RADIX_UNKNOWN;
+
+		for (size_t i = 0; i < expected_len; i++) {
+			char c = tolower(src_str[i]);
+
+			if (isdigit(c)) {
+				radix = RADIX_DECIMAL;
+			}
+
+			else if (ishex(c)) {
+				radix = RADIX_HEXADECIMAL;
+			}
+
+			else {
+				radix = RADIX_UNKNOWN; break;
+			}
+		}
+
+		if (radix != RADIX_UNKNOWN) {
+			if (endptr) *endptr = str;
+
+			switch (radix) {
+				case RADIX_DECIMAL:
+					return PARSER_NUM_ERR_MAY_DECIMAL;
+				case RADIX_HEXADECIMAL:
+					return PARSER_NUM_ERR_MAY_HEXADECIMAL;
+				default: break;
+			}
+		}
+
+		return PARSER_NUM_ERR_INVALID_LITERAL;
+	}
+
+	if (*str == 'e') {
+		str++;
+		
+		printf("\"%s\"\n\r", str);
+
+		uint64 exp = 0;
+		parse_num(&exp, str, &str);
+
+		number *= powi(base, exp);
+	}
+
+	if (endptr) *endptr = str;
+
+	if (result) *result = number;
+
+	return err;
 }
 
 bool isnum(char c) {
@@ -321,4 +424,28 @@ char* bytes_as_str(byte* bytes, size_t bytes_cnt) {
 	}
 
 	return result;
+}
+
+#ifdef IS_UNIX
+#include <unistd.h>
+#endif
+
+term_type_e get_term_type(void) {
+	#ifdef IS_WIN
+	return TERM_WINDOWS;
+	#endif
+	
+	if (!isatty(STDOUT_FILENO)) {
+		return TERM_DUMB;
+	}
+
+	const char* term_name = getenv("TERM");
+
+	if (!term_name) return TERM_DUMB;
+
+	if (memcmp(term_name, "xterm", 6) == 0) {
+		return TERM_XTERM;
+	}
+
+	return TERM_DUMB;
 }

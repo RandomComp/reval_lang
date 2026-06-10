@@ -48,7 +48,11 @@ int main(int argc, char** argv) {
 
 	tokens_t tokens = { 0 };
 
-	tokenize(&tokens, expr_str, nullptr);
+	const char* expr_endptr = expr_str;
+
+	errors_t errs = { 0 };
+	
+	errs = tokenize(errs, &tokens, expr_str, &expr_endptr);
 
 	for (size_t i = 0; i < tokens.tokens_cnt; i++) {
 		char buf[32] = { 0 };
@@ -58,47 +62,54 @@ int main(int argc, char** argv) {
 		printf("%s\n\r", buf);
 	}
 
+	if (errs.level >= ERROR_LEVEL_ERROR) {
+		print_errors(errs, expr_str);
+
+		free_errors(errs);
+
+		free(tokens.tokens);
+
+		return 0;
+	}
+
 	expression_t* expr = nullptr;
 
 	const token_t* endptr = tokens.tokens;
 
-	int err = 0;
-
 	int result = 0;
 
-	err = parse_compare(&expr, endptr, &endptr);
+	errs = parse_ternary(errs, &expr, endptr, &endptr);
 
-	if (endptr->kind == TOKEN_UNDEFINED) {
-		err = PARSER_ERR_INVALID_SYNTAX;
+	// if (endptr->kind == TOKEN_UNDEFINED ||
+	// 	endptr != (tokens.tokens + tokens.tokens_cnt - 1)) {
+	// 	errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, endptr->column, endptr->row, endptr->end_column, endptr->end_row, nullptr);
+	// }
+
+	if (errs.level >= ERROR_LEVEL_ERROR) {
+		print_errors(errs, expr_str);
+
+		free_errors(errs);
+
+		free_expresion(expr); expr = nullptr;
+
+		free(tokens.tokens);
+
+		return 0;
 	}
 
-	if (err != 0 && endptr->kind != TOKEN_EOF) {
-		printf("\n\r%u: error: %s\n\r", 0, get_parser_err_description(err));
+	char buf[128] = { 0 };
 
-		printf("%6u" SEPERATOR "%*s", 0, 4, "");
-		for (size_t i = 0; i < tokens.tokens_cnt; i++) {
-			char buf[64] = { 0 };
+	view_expresion(buf, 128, expr);
 
-			get_token_c(buf, 64, tokens.tokens[i]);
+	printf("%s\n\r", buf);
 
-			printf("%.64s ", buf);
-		}
-		printf("\n\r");
+	errs = eval_expresion(errs, &result, expr);
 
-		printf("%6s" SEPERATOR "%*s^\n\r", "", 4, "");
-
-		printf("%td\n\r", endptr - tokens.tokens);
-	}
-
-	show_expresion(expr); printf("\n\r");
-
-	err = eval_expresion(&result, expr);
-
-	if (err != 0) {
-		printf("%s\n\r", get_eval_err_description(err));
-	}
+	print_errors(errs, expr_str);
 
 	printf("result %i\n\r", result);
+
+	free_errors(errs);
 
 	free_expresion(expr); expr = nullptr;
 
