@@ -48,7 +48,7 @@ BASE_CFLAGS := \
 	-Wswitch -Werror=tautological-compare -Werror=trigraphs -Wunused-function \
 	-Werror=empty-body -Wimplicit-fallthrough \
 	-Werror=shift-negative-value -Werror=unused-but-set-parameter \
-	-Waddress-of-packed-member -Werror=format -Werror=missing-declarations -funsigned-char \
+	-Waddress-of-packed-member -Werror=format -funsigned-char \
 	-Werror=implicit-fallthrough -Werror=strict-aliasing
 
 LINK_CFLAGS := 

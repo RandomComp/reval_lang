@@ -1,6 +1,7 @@
 #include "types.h"
 #include "lexer.h"
 #include "parser.h"
+#include "eval.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,6 +55,8 @@ int main(int argc, char** argv) {
 	
 	errs = tokenize(errs, &tokens, expr_str, &expr_endptr);
 
+	// errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_EOF, ERROR_LEVEL_WARN, 0, 0, 5, 0, "test add", "test del", "hello, wass'up, bro");
+
 	for (size_t i = 0; i < tokens.tokens_cnt; i++) {
 		char buf[32] = { 0 };
 
@@ -67,7 +70,7 @@ int main(int argc, char** argv) {
 
 		free_errors(errs);
 
-		free(tokens.tokens);
+		free_tokens(tokens);
 
 		return 0;
 	}
@@ -78,12 +81,12 @@ int main(int argc, char** argv) {
 
 	int result = 0;
 
-	errs = parse_ternary(errs, &expr, endptr, &endptr);
+	errs = parse_semicolon(errs, &expr, endptr, &endptr);
 
-	// if (endptr->kind == TOKEN_UNDEFINED ||
-	// 	endptr != (tokens.tokens + tokens.tokens_cnt - 1)) {
-	// 	errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, endptr->column, endptr->row, endptr->end_column, endptr->end_row, nullptr);
-	// }
+	if (endptr->kind == TOKEN_UNDEFINED ||
+		endptr != (tokens.tokens + tokens.tokens_cnt - 1)) {
+		errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, endptr->column, endptr->row, endptr->end_column, endptr->end_row, nullptr, nullptr, nullptr);
+	}
 
 	if (errs.level >= ERROR_LEVEL_ERROR) {
 		print_errors(errs, expr_str);
@@ -92,7 +95,7 @@ int main(int argc, char** argv) {
 
 		free_expresion(expr); expr = nullptr;
 
-		free(tokens.tokens);
+		free_tokens(tokens);
 
 		return 0;
 	}
@@ -107,13 +110,13 @@ int main(int argc, char** argv) {
 
 	print_errors(errs, expr_str);
 
-	printf("result %i\n\r", result);
+	printf("%i\n\r", result);
 
 	free_errors(errs);
 
 	free_expresion(expr); expr = nullptr;
 
-	free(tokens.tokens);
+	free_tokens(tokens);
 
 	return 0;
 }

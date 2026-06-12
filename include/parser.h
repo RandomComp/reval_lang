@@ -14,9 +14,12 @@ struct expression_t {
 
 	expression_t *left, *right, *center;
 
-	int val;
+	int val; char* word;
 
 	tokens_kind_e op;
+
+	ssize_t column, row;
+	ssize_t end_column, end_row;
 };
 
 // typedef enum operator_assoc_e {
@@ -41,7 +44,13 @@ struct expression_t {
 // 	operator_parser_t parser;
 // } operator_t;
 
+errors_t parse_semicolon(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
+
+errors_t parse_assignment(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
+
 errors_t parse_ternary(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
+
+errors_t parse_logical(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
 
 errors_t parse_compare(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
 
@@ -49,11 +58,11 @@ errors_t parse_add(errors_t errs, expression_t **_result, const token_t* tokens,
 
 errors_t parse_mult(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
 
+errors_t parse_pow(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
+
 errors_t parse_unar(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr);
 
 size_t view_expresion(char* buf, size_t buf_size, expression_t* expr);
-
-errors_t eval_expresion(errors_t errs, int* result, expression_t* expr);
 
 void free_expresion(expression_t* expr);
 

@@ -7,7 +7,7 @@
 
 #include "errors.h"
 
-errors_t emit_error(errors_t errors, subsystem_e subsystem, error_e type, error_level_e level, ssize_t st_column, ssize_t st_row, ssize_t columns, ssize_t rows, const char* msg, ...) {
+errors_t emit_error(errors_t errors, subsystem_e subsystem, error_e type, error_level_e level, ssize_t st_column, ssize_t st_row, ssize_t columns, ssize_t rows, const char* add_hint, const char* del_hint, const char* msg, ...) {
 	va_list ptr;
 
 	va_start(ptr, msg);
@@ -52,6 +52,14 @@ errors_t emit_error(errors_t errors, subsystem_e subsystem, error_e type, error_
 	cur->columns = columns;
 	cur->rows = rows;
 
+	if (add_hint) {
+		cur->add_hint = strdup(add_hint);
+	}
+
+	if (del_hint) {
+		cur->del_hint = strdup(del_hint);
+	}
+
 	va_end(ptr);
 
 	errors.errors_cnt++;
@@ -72,6 +80,14 @@ void free_errors(errors_t errs) {
 		if (cur->msg) free(cur->msg);
 		
 		cur->msg = nullptr;
+
+		if (cur->add_hint) free(cur->add_hint);
+		
+		cur->add_hint = nullptr;
+
+		if (cur->del_hint) free(cur->del_hint);
+		
+		cur->del_hint = nullptr;
 	}
 
 	free(errs.errors);
@@ -79,26 +95,60 @@ void free_errors(errors_t errs) {
 	errs.errors_cnt = 0; errs.errors_size = 0;
 }
 
+const static term_colors_e levels_color[] = {
+	[ERROR_LEVEL_NOTE] = TERM_COLOR_AQUA,
+	[ERROR_LEVEL_WARN] = TERM_COLOR_MAGENTA,
+	[ERROR_LEVEL_ERROR] = TERM_COLOR_BRIGHT_RED,
+	[ERROR_LEVEL_FATAL] = TERM_COLOR_BRIGHT_RED,
+};
+
 void print_errors(errors_t errs, const char* expr) {
-	if (errs.errors && errs.level >= ERROR_LEVEL_NOTE) {
+	if (errs.errors && errs.level != ERROR_LEVEL_OK) {
 		for (size_t i = 0; i < errs.errors_cnt; i++) {
 			error_t *cur = errs.errors + i;
 
-			fprintf(stderr, "%zu: %s %s: %s\n\r", cur->st_row, get_subsystem_name(cur->subsystem), get_level_name(cur->level), cur->msg);
+			term_colors_e level_color = levels_color[cur->level];
+			
+			set_fg_color(stderr, TERM_COLOR_BRIGHT_WHITE);
+			fprintf(stderr, "%zu:%zu: ", cur->st_row + 1, cur->st_column + 1);
+			set_fg_color(stderr, level_color);
+			fprintf(stderr, "%s %s", get_subsystem_name(cur->subsystem), get_level_name(cur->level));
+			set_default(stderr);
+			set_fg_color(stderr, TERM_COLOR_BRIGHT_WHITE);
+			fprintf(stderr, ": %s\n\r", cur->msg);
+			set_default(stderr);
 
-			fprintf(stderr, "%6zu" SEPERATOR " ", cur->st_column);
-			for (size_t j = 0; expr[j]; j++) {
-				char c = expr[j];
+			ssize_t expr_j = 0, expr_row = 0;
 
-				if (c == '\t') {
-					fprintf(stderr, "    ");
+			while (expr[expr_j]) {
+				// expr_j += skip_spaces(expr);
+				expr_j += strspn(expr, "\n\r");
+
+				fprintf(stderr, "%6zu" SEPERATOR " ", expr_row);
+				for (; expr[expr_j] && strchr("\n\r", expr[expr_j]) == nullptr; expr_j++) {
+					if (expr_j == cur->st_column) {
+						set_fg_color(stderr, level_color);
+					}
+
+					if (expr_j >= (cur->st_column + cur->columns)) {
+						set_default(stderr);
+					}
+
+					char c = expr[expr_j];
+
+					if (c == '\t') {
+						fprintf(stderr, "    ");
+					}
+
+					else {
+						fputc(c, stderr);
+					}
 				}
+				set_default(stderr);
+				fprintf(stderr, "\n\r");
 
-				else {
-					fputc(c, stderr);
-				}
+				expr_row++;
 			}
-			fprintf(stderr, "\n\r");
 
 			fprintf(stderr, "%6s" SEPERATOR " %*s", "", (int)cur->st_column, "");
 
@@ -112,7 +162,21 @@ void print_errors(errors_t errs, const char* expr) {
 
 			fprintf(stderr, "\n\r");
 
-			fprintf(stderr, "%zu/%zu\n\r", cur->st_column, cur->columns);
+			if (cur->del_hint) {
+				fprintf(stderr, "%6s %*s -", "", (int)cur->st_column - 1, "");
+				set_fg_color(stderr, TERM_COLOR_RED);
+				fprintf(stderr, "%s\n\r", cur->del_hint);
+				set_default(stderr);
+			}
+
+			if (cur->add_hint) {
+				fprintf(stderr, "%6s %*s +", "", (int)cur->st_column - 1, "");
+				set_fg_color(stderr, TERM_COLOR_GREEN);
+				fprintf(stderr, "%s\n\r", cur->add_hint);
+				set_default(stderr);
+			}
+
+			// printf("%zu/%zu\n\r", cur->st_column, cur->columns);
 		}
 	}
 } 

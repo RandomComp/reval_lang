@@ -50,7 +50,8 @@ typedef enum error_level_e {
 typedef struct error_t {
 	subsystem_e subsystem;
 	error_e type;
-	char* msg;
+	char *msg;
+	char *add_hint, *del_hint;
 
 	error_level_e level;
 
@@ -67,7 +68,11 @@ typedef struct errors_t {
 	error_level_e level;
 } errors_t;
 
-errors_t emit_error(errors_t errors, subsystem_e subsystem, error_e type, error_level_e level, ssize_t st_column, ssize_t st_row, ssize_t columns, ssize_t rows, const char* msg, ...);
+errors_t emit_error(errors_t errors, subsystem_e subsystem, error_e type, error_level_e level, 
+	ssize_t st_column, ssize_t st_row, 
+	ssize_t columns, ssize_t rows,
+	const char* add_hint, const char* del_hint,
+	const char* msg, ...);
 
 void free_errors(errors_t errs);
 

@@ -1,11 +1,42 @@
 #include "utils.h"
 
+#include "ansi.h"
 #include "types.h"
+#include "lexer_fwd.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
+
+size_t skip_spaces(const char* text) {
+	size_t index = 0;
+
+	if (strchr(" \f\n\r\t\v", *text) != nullptr) {
+		index += strspn(text, " \f\n\r\t\v");
+	}
+
+	return index;
+}
+
+void count_spaces(size_t* column, size_t* row, const char* text) {
+	while (*text && strchr(" \t\n", *text) != nullptr) {
+		switch (*text) {
+			case ' ':
+				if (column) *column += 1;
+				break;
+			case '\t':
+				if (column) *column += 1;
+				break;
+			case '\n':
+				if (column) *column = 0;
+				if (row) *row += 1;
+				break;
+		}
+
+		text++;
+	}
+}
 
 int64 align_up(int64 num, int64 align) {
 	if (align == 0 || num % align == 0)
@@ -136,6 +167,30 @@ radix_e get_num_radix(const char* str) {
 	return RADIX_DECIMAL;
 }
 
+const char* get_radix_prefix(radix_e radix) {
+	switch (radix) {
+		case RADIX_BINARY: 		return "0b";
+		case RADIX_OCTAL: 		return "0o";
+		case RADIX_DECIMAL: 	return "";
+		case RADIX_HEXADECIMAL: return "0x";
+		default: break;
+	}
+
+	return nullptr;
+}
+
+const char* get_radix_alphbaet(radix_e radix) {
+	switch (radix) {
+		case RADIX_BINARY: 		return "01";
+		case RADIX_OCTAL: 		return "01234567";
+		case RADIX_DECIMAL: 	return "0123456789";
+		case RADIX_HEXADECIMAL: return "0123456789abcdef";
+		default: break;
+	}
+
+	return nullptr;
+}
+
 const char* get_radix_name(radix_e radix) {
 	switch (radix) {
 		case RADIX_BINARY: return "binary";
@@ -167,8 +222,6 @@ char* get_number_part(const char* str) {
 
 	return (char*)str;
 }
-
-#define ALPHABET " +-*/%><?:()=!"
 
 parse_num_err_e parse_num(uint64* result, const char* str, const char** endptr) {
 	int base = 10;
@@ -207,11 +260,11 @@ parse_num_err_e parse_num(uint64* result, const char* str, const char** endptr) 
 		for (size_t i = 0; i < expected_len; i++) {
 			char c = tolower(src_str[i]);
 
-			if (isdigit(c)) {
+			if (radix <= RADIX_DECIMAL && isdigit(c)) {
 				radix = RADIX_DECIMAL;
 			}
 
-			else if (ishex(c)) {
+			else if (radix <= RADIX_HEXADECIMAL && ishex(c)) {
 				radix = RADIX_HEXADECIMAL;
 			}
 
@@ -334,16 +387,6 @@ int convert_byte_to_int(byte val) {
 	return (int)val;
 }
 
-const char* get_home_dir(void) {
-	#ifdef IS_UNIX
-	return getenv("HOME");
-	#elif defined(IS_WIN)
-	return getenv("USERPROFILE");
-	#endif
-
-	return nullptr;
-}
-
 char* bytes_as_str(byte* bytes, size_t bytes_cnt) {
 	size_t size = 0;
 
@@ -426,26 +469,151 @@ char* bytes_as_str(byte* bytes, size_t bytes_cnt) {
 	return result;
 }
 
+const char* get_home_dir(void) {
+	#ifdef IS_UNIX
+	return getenv("HOME");
+	#elif defined(IS_WIN)
+	return getenv("USERPROFILE");
+	#endif
+
+	return nullptr;
+}
+
+size_t strlcspn(const char* str, const char* reject) {
+	size_t len = strlen(str);
+
+	size_t index = len;
+
+	while (true) {
+		if (strchr(reject, str[index]) == nullptr) {
+			break;
+		}
+
+		index--;
+	}
+
+	return index;
+}
+
 #ifdef IS_UNIX
 #include <unistd.h>
+#elif defined(IS_WIN)
+#include <windows.h>
 #endif
 
 term_type_e get_term_type(void) {
 	#ifdef IS_WIN
 	return TERM_WINDOWS;
-	#endif
-	
-	if (!isatty(STDOUT_FILENO)) {
+	#elif defined(IS_UNIX)
+	if (!isatty(STDOUT_FILENO) || !isatty(STDERR_FILENO)) {
 		return TERM_DUMB;
 	}
 
 	const char* term_name = getenv("TERM");
 
-	if (!term_name) return TERM_DUMB;
-
-	if (memcmp(term_name, "xterm", 6) == 0) {
-		return TERM_XTERM;
+	if (!term_name || 
+		strstr(term_name, "dumb") != nullptr ||
+		strstr(term_name, "vt100") != nullptr ||
+		strstr(term_name, "ansi") != nullptr) {
+		return TERM_DUMB;
 	}
 
+	if (strstr(term_name, "xterm") != nullptr ||
+		strstr(term_name, "256color") != nullptr) {
+		return TERM_XTERM;
+	}
+	#endif
+
 	return TERM_DUMB;
+}
+
+byte color_to_ansi(term_colors_e color) {
+	switch (color) {
+		case TERM_COLOR_BLUE:
+			return BLUE_ANSI_ID;
+		case TERM_COLOR_GREEN:
+			return GREEN_ANSI_ID;
+		case TERM_COLOR_AQUA:
+			return AQUA_ANSI_ID;
+		case TERM_COLOR_RED:
+			return RED_ANSI_ID;
+		case TERM_COLOR_MAGENTA:
+			return MAGENTA_ANSI_ID;
+		case TERM_COLOR_BROWN:
+			return YELLOW_ANSI_ID;
+		case TERM_COLOR_WHITE:
+			return WHITE_ANSI_ID;
+		default:
+			return 0;
+	}
+
+	return 0;
+}
+
+static term_colors_e cur_fg = TERM_COLOR_WHITE;
+static term_colors_e cur_bg = TERM_COLOR_BLACK;
+
+term_colors_e set_fg_color(FILE* out_or_err, term_colors_e color) {
+	term_colors_e def = cur_fg;
+
+	#ifdef IS_WIN
+	HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	cur_fg = color;
+
+	SetConsoleTextAttribute(handle, cur_bg << 8 | cur_fg);
+	#else
+	term_type_e type = get_term_type();
+
+	if (type == TERM_DUMB) return TERM_COLOR_WHITE;
+
+	if ((color & 0x08) != 0) {
+		fprintf(out_or_err, "\x1B[%u;1m", color_to_ansi(color & 0x07));
+	}
+
+	else {
+		fprintf(out_or_err, "\x1B[%um", color_to_ansi(color));
+	}
+	#endif
+
+	return def;
+}
+
+term_colors_e set_bg_color(FILE* out_or_err, term_colors_e color) {
+	term_colors_e def = cur_bg;
+
+	#ifdef IS_WIN
+	HANDLE handle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	cur_bg = color;
+
+	SetConsoleTextAttribute(handle, cur_bg << 8 | cur_fg);
+	#else
+	term_type_e type = get_term_type();
+
+	if (type == TERM_DUMB) return TERM_COLOR_BLACK;
+
+	if ((color & 0x08) != 0) {
+		fprintf(out_or_err, "\x1B[%u;1m", color_to_ansi(color & 0x07) + 10);
+	}
+
+	else {
+		fprintf(out_or_err, "\x1B[%um", color_to_ansi(color) + 10);
+	}
+	#endif
+
+	return def;
+}
+
+void set_default(FILE* out_or_err) {
+	#ifdef IS_WIN
+	set_fg_color(out_or_err, TERM_COLOR_WHITE);
+	set_bg_color(out_or_err, TERM_COLOR_BLACK);
+	#else
+	term_type_e type = get_term_type();
+
+	if (type == TERM_DUMB) return;
+
+	fprintf(out_or_err, "\x1B[0m");
+	#endif
 }
