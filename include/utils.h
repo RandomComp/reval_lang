@@ -4,15 +4,30 @@
 #include "types.h"
 #include <stdio.h>
 
-size_t skip_spaces(const char* text);
+#define FILENAMES_ALLOC_STEP 4
 
-void count_spaces(size_t* column, size_t* row, const char* text);
+typedef struct interneds_t {
+	char **interneds; size_t cnt, size;
+} interneds_t;
+
+// new interned string
+const char *get_interned(interneds_t *interneds, const char *str);
+
+// free interned strings
+void free_interneds(interneds_t *filenames);
+
+void *recalloc(void *ptr, size_t old_size, size_t new_size);
+
+size_t skip_spaces(const char *text);
+void count_spaces(size_t *column, size_t *row, const char *text);
+
+size_t skip_newlines(const char *text, size_t count);
 
 int64 align_up(int64 num, int64 align);
 
 int64 align_down(int64 num, int64 align);
 
-char* parse_cli_args(char* _str);
+char *parse_cli_args(char *_str);
 
 typedef enum radix_e {
 	RADIX_UNKNOWN,
@@ -32,10 +47,12 @@ typedef enum parse_num_err_e {
 
 radix_e get_num_radix(const char* str);
 const char* get_radix_prefix(radix_e radix);
-const char* get_radix_alphbaet(radix_e radix);
+const char* get_radix_alphabet(radix_e radix);
 const char* get_radix_name(radix_e radix);
 char* get_number_part(const char* str);
 parse_num_err_e parse_num(uint64* result, const char* str, const char** endptr);
+
+size_t parse_str(char *buf, size_t buf_size, const char* str, const char** endptr);
 
 bool isnum(char c);
 

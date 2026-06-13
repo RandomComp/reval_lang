@@ -67,14 +67,14 @@ error_e recognize_token_len(size_t* _result, const char* c, const char** _endptr
 	return err;
 }
 
-errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_column, size_t* end_row, token_t* _result, const char* c, const char** endptr) {
+errors_t recognize_token(errors_t errs, interneds_t *interneds, const char* filename, size_t column, size_t row, size_t* end_column, size_t* end_row, token_t* _result, const char* c, const char** endptr) {
 	token_t result = { .kind = TOKEN_UNDEFINED, .val = 0 };
+
+	result.filename = get_interned(interneds, filename);
 
 	bool recognized = false;
 
 	size_t _end_columns = 0, _end_rows = 0;
-
-	// printf("st c = %.2x '%c'\n\r", *c, *c);
 
 	if (*c == 0) {
 		result.kind = TOKEN_EOF;
@@ -95,10 +95,10 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 		if (parse_num_err == PARSER_NUM_ERR_LEADING_ZEROES) {
 			size_t leading_zeroes_len = strcspn(c, "1234567" ALPHABET);
 
-			errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_LEADING_ZEROES_IN_NUMBER, ERROR_LEVEL_WARN, column, row, _end_columns + leading_zeroes_len, _end_rows, nullptr, nullptr, nullptr);
+			errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_LEADING_ZEROES_IN_NUMBER, ERROR_LEVEL_WARN, filename, column, row, _end_columns + leading_zeroes_len, _end_rows, nullptr, nullptr, nullptr);
 		}
 
-		size_t expected_len = strcspn(c, ALPHABET);
+		size_t expected_len = strcspn(c, SPACES ALPHABET);
 
 		radix_e radix = get_num_radix(c);
 		const char* radix_name = get_radix_name(radix);
@@ -106,7 +106,7 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 
 		size_t c_part_expected_len = strcspn(c_part, ALPHABET);
 
-		const char* alphabet = get_radix_alphbaet(radix);
+		const char* alphabet = get_radix_alphabet(radix);
 
 		radix_e may_be_radix = radix;
 
@@ -138,7 +138,7 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 
 			snprintf(del_str, del_str_len, "%.*s", (int)expected_len, c);
 		
-			errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_INVALID_NUMBER_RADIX, ERROR_LEVEL_ERROR, column, row, _end_columns, _end_rows, add_str, del_str, "invalid \"%.*s\" digits in %s literal, did you mean %s \"%s\"?", first_valid_digit - len + 1, c + len, radix_name, may_be_radix_name, add_str);
+			errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_INVALID_NUMBER_RADIX, ERROR_LEVEL_ERROR, filename, column, row, _end_columns, _end_rows, add_str, del_str, "invalid \"%.*s\" digits in %s literal, did you mean %s \"%s\"?", first_valid_digit - len + 1, c + len, radix_name, may_be_radix_name, add_str);
 			
 			free(add_str);
 			free(del_str);
@@ -148,7 +148,7 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 
 		if (parse_num_err == 0 || parse_num_err == PARSER_NUM_ERR_INVALID_LITERAL) {
 			if (expected_endc != endc)  {
-				errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_INVALID_NUMBER, ERROR_LEVEL_ERROR, column, row, _end_columns, _end_rows, nullptr, nullptr, "\"%.*s\" is not valid %s number", expected_len, c, radix_name);
+				errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_INVALID_NUMBER, ERROR_LEVEL_ERROR, filename, column, row, _end_columns, _end_rows, nullptr, nullptr, "\"%.*s\" is not valid %s number", expected_len, c, radix_name);
 			}
 		}
 
@@ -168,7 +168,7 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 		for (size_t i = 0; TWO_C_OPS[i]; i += 2) {
 			if (TWO_C_OPS[i] == c[0] &&
 				TWO_C_OPS[i + 1] == c[1]) {
-				result.kind = index + TOKEN_POW;
+				result.kind = index + TOKEN_INCREMENT;
 
 				recognized = true;
 				
@@ -184,6 +184,8 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 	}
 	
 	if (!recognized) {
+		if (*c == 0) goto exit;
+
 		const char* one_c_op = strchr(ONE_C_OPS, *c);
 
 		if (one_c_op != nullptr) {
@@ -191,20 +193,54 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 
 			result.kind = kind;
 
-			c++;
+			size_t times = *c == ';' ? strspn(c, " " SPACES ";") : 1; // skip multiple semicolon delimeters
+
+			c += times;
 
 			recognized = true;
 
-			_end_columns += 1;
+			_end_columns += times;
+		}
+
+		else if (*c == '\"') {
+			const char *str_endptr = c;
+
+			result.kind = TOKEN_STRING;
+
+			size_t length = parse_str(nullptr, 0, c, &str_endptr) + 1;
+
+			char *temp = malloc(length);
+
+			parse_str(temp, length, c, &str_endptr);
+
+			if (!temp) {
+				errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_DOUBLE_QUOTE_NEVER_CLOSED, ERROR_LEVEL_ERROR, filename, column, row, 1, _end_rows, nullptr, nullptr, "quote '\"' was never closed");
+			}
+
+			result.word = get_interned(interneds, temp);
+
+			// else if (str_endptr >= (c + strlen(c))) {
+			// 	errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_DOUBLE_QUOTE_NEVER_CLOSED, ERROR_LEVEL_ERROR, filename, column, row, 1, _end_rows, nullptr, nullptr, "quote '\"' was never closed");
+			// }
+
+			recognized = true;
+
+			c = str_endptr;
+
+			_end_columns += str_endptr - c;
 		}
 
 		else if (strchr(ALPHABET "0123456789", *c) == nullptr) {
-			size_t expected_len = strcspn(c, ALPHABET);
+			size_t expected_len = strcspn(c, SPACES ALPHABET);
 
 			result.kind = TOKEN_WORD;
-			result.word = malloc(expected_len + 1);
+			char *temp = malloc(expected_len + 1);
 
-			snprintf(result.word, expected_len + 1, "%.*s", (int)expected_len, c);
+			snprintf(temp, expected_len + 1, "%.*s", (int)expected_len, c);
+
+			result.word = get_interned(interneds, temp);
+
+			free(temp);
 
 			recognized = true;
 
@@ -218,19 +254,21 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 		result.column = column;
 		result.row = row;
 
-		result.end_column = _end_columns;
-		result.end_row = _end_rows;
+		result.end_column = column + _end_columns;
+		result.end_row = row + _end_rows;
 	}
 
 	if (!recognized) {
-		size_t expected_len = strcspn(c, " " ONE_C_OPS);
+		size_t expected_len = strcspn(c, SPACES ONE_C_OPS);
 
-		errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, column, row, expected_len, _end_rows, nullptr, nullptr, "unexpected symbols \"%.*s\"", expected_len, c);
+		errs = emit_error(errs, SUBSYSTEM_LEXER, ERROR_LEXER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, filename, column, row, expected_len, _end_rows, nullptr, nullptr, "unexpected symbols \"%.*s\"", expected_len, c);
 
 		result.kind = TOKEN_UNEXPECTED;
 	}
 
 	if (_result) *_result = result;
+
+	exit:
 
 	if (end_column) *end_column = _end_columns;
 	if (end_row) *end_row = _end_rows;
@@ -240,14 +278,14 @@ errors_t recognize_token(errors_t errs, size_t column, size_t row, size_t* end_c
 	return errs;
 }
 
-errors_t tokenize(errors_t errs, tokens_t *_result, const char* code, const char** endptr) {
+errors_t tokenize(errors_t errs, tokens_t *_result, interneds_t *interneds, const char* filename, const char* code, const char** endptr) {
 	tokens_t result = { 0 };
 
 	if (_result) {
-		result.tokens = calloc(TOKENS_KIND_ALLOC_STEP, sizeof(token_t));
+		result.tokens = calloc(TOKENS_ALLOC_STEP, sizeof(token_t));
 	}
 
-	size_t size = TOKENS_KIND_ALLOC_STEP;
+	size_t size = TOKENS_ALLOC_STEP;
 
 	size_t columns = 0, rows = 0;
 
@@ -261,7 +299,7 @@ errors_t tokenize(errors_t errs, tokens_t *_result, const char* code, const char
 		if (code[0] == '/' && code[1] == '/') {
 			code += 2;
 
-			while (*code && strchr("\f\n\r\v", *code) == nullptr) {
+			while (*code && strchr(SPACES, *code) == nullptr) {
 				code++;
 			}
 
@@ -269,11 +307,11 @@ errors_t tokenize(errors_t errs, tokens_t *_result, const char* code, const char
 		}
 
 		if (_result && result.tokens_cnt >= size) {
-			result.tokens = realloc(result.tokens, (size + TOKENS_KIND_ALLOC_STEP) * sizeof(token_t));
+			result.tokens = realloc(result.tokens, (size + TOKENS_ALLOC_STEP) * sizeof(token_t));
 
-			memset(result.tokens + size, 0, TOKENS_KIND_ALLOC_STEP);
+			memset(result.tokens + size, 0, TOKENS_ALLOC_STEP);
 
-			size += TOKENS_KIND_ALLOC_STEP;
+			size += TOKENS_ALLOC_STEP;
 		}
 
 		token_t* cur = result.tokens + result.tokens_cnt;
@@ -281,7 +319,7 @@ errors_t tokenize(errors_t errs, tokens_t *_result, const char* code, const char
 		size_t end_columns = 0, end_rows = 0;
 
 		if (_result) {
-			errs = recognize_token(errs, columns, rows, &end_columns, &end_rows, cur, code, &code);
+			errs = recognize_token(errs, interneds, filename, columns, rows, &end_columns, &end_rows, cur, code, &code);
 
 			if (result.tokens[result.tokens_cnt].kind == TOKEN_UNEXPECTED ||
 				result.tokens[result.tokens_cnt].kind == TOKEN_EOF) break;
@@ -314,7 +352,6 @@ errors_t tokenize(errors_t errs, tokens_t *_result, const char* code, const char
 void free_token(token_t *token) {
 	if (!token) return;
 
-	if (token->word) free(token->word);
 	token->word = nullptr;
 
 	free(token);
@@ -322,8 +359,9 @@ void free_token(token_t *token) {
 
 void free_tokens(tokens_t tokens) {
 	for (size_t i = 0; i < tokens.tokens_cnt; i++) {
-		if (tokens.tokens[i].word) free(tokens.tokens[i].word);
 		tokens.tokens[i].word = nullptr;
+
+		tokens.tokens[i].filename = nullptr;
 	}
 
 	free(tokens.tokens);
@@ -333,12 +371,34 @@ const char* get_token_kind_name(tokens_kind_e kind) {
 	switch (kind) {
 		case TOKEN_UNDEFINED:
 			return "UNDEFINED";
+		case TOKEN_ONE_CHAR_OPERATORS_START:
+			return "ONE CHAR OPERATORS START";
+		case TOKEN_TWO_CHAR_OPERATORS_START:
+			return "TWO CHAR OPERATORS START";
+		case TOKEN_THREE_CHAR_OPERATORS_START:
+			return "THREE CHAR OPERATORS START";
 		case TOKEN_PLUS:
 			return "PLUS";
 		case TOKEN_MINUS:
 			return "MINUS";
+		case TOKEN_INCREMENT:
+			return "INCREMENT";
+		case TOKEN_DECREMENT:
+			return "DECREMENT";
 		case TOKEN_POW:
 			return "POW";
+		case TOKEN_PLUS_ASSIGNMENT:
+			return "PLUS ASSIGNMENT";
+		case TOKEN_MINUS_ASSIGNMENT:
+			return "MINUS ASSIGNMENT";
+		case TOKEN_MULTIPLY_ASSIGNMENT:
+			return "MULTIPLY ASSIGNMENT";
+		case TOKEN_DIVIDE_ASSIGNMENT:
+			return "DIVIDE ASSIGNMENT";
+		case TOKEN_REMAINDER_ASSIGNMENT:
+			return "REMAINDER ASSIGNMENT";
+		case TOKEN_POW_ASSIGNMENT:
+			return "POW ASSIGNMENT";
 		case TOKEN_MULTIPLY:
 			return "MULTIPLY";
 		case TOKEN_DIVIDE:
@@ -354,9 +414,9 @@ const char* get_token_kind_name(tokens_kind_e kind) {
 		case TOKEN_LESS_EQUALS:
 			return "LESS EQUALS";
 		case TOKEN_LOGIC_AND:
-			return "LOGIC AND"; break;
+			return "LOGIC AND";
 		case TOKEN_LOGIC_OR:
-			return "LOGIC OR"; break;
+			return "LOGIC OR";
 		case TOKEN_GREATER:
 			return "GREATER";
 		case TOKEN_LESS:
@@ -369,6 +429,8 @@ const char* get_token_kind_name(tokens_kind_e kind) {
 			return "NUMBER";
 		case TOKEN_WORD:
 			return "WORD";
+		case TOKEN_STRING:
+			return "STRING";
 		case TOKEN_LEFT_PARENT:
 			return "LPAR";
 		case TOKEN_RIGHT_PARENT:
@@ -387,6 +449,14 @@ const char* get_token_kind_name(tokens_kind_e kind) {
 			return "EOF";
 		case TOKEN_PARSER_UNARY_ONLY:
 			return "PARSER UNARY ONLY";
+		case TOKEN_PREINCREMENT:
+			return "PREINCREMENT";
+		case TOKEN_PREDECREMENT:
+			return "PREDECREMENT";
+		case TOKEN_POSTINCREMENT:
+			return "POSTINCREMENT";
+		case TOKEN_POSTDECREMENT:
+			return "POSTDECREMENT";
 	}
 
 	return "";
@@ -405,6 +475,10 @@ ssize_t get_token_name(char* buf, size_t buf_size, token_t token) {
 		result += snprintf(buf, buf_size, "WORD %s", token.word);
 	}
 
+	else if (token.kind == TOKEN_STRING) {
+		result += snprintf(buf, buf_size, "STRING \"%s\"", token.word);
+	}
+
 	else {
 		result += snprintf(buf, buf_size, "%s", get_token_kind_name(token.kind));
 	}
@@ -420,12 +494,42 @@ ssize_t get_token_c(char* buf, size_t buf_size, token_t token) {
 	switch (token.kind) {
 		case TOKEN_UNDEFINED:
 			break;
+		case TOKEN_ONE_CHAR_OPERATORS_START:
+			break;
+		case TOKEN_TWO_CHAR_OPERATORS_START:
+			break;
+		case TOKEN_THREE_CHAR_OPERATORS_START:
+			break;
+		case TOKEN_PREINCREMENT:
+			break;
+		case TOKEN_PREDECREMENT:
+			break;
+		case TOKEN_POSTINCREMENT:
+			break;
+		case TOKEN_POSTDECREMENT:
+			break;
 		case TOKEN_PLUS:
 			result += snprintf(buf, buf_size, "+"); break;
 		case TOKEN_MINUS:
 			result += snprintf(buf, buf_size, "-"); break;
+		case TOKEN_INCREMENT:
+			result += snprintf(buf, buf_size, "++"); break;
+		case TOKEN_DECREMENT:
+			result += snprintf(buf, buf_size, "--"); break;
 		case TOKEN_POW:
 			result += snprintf(buf, buf_size, "**"); break;
+		case TOKEN_PLUS_ASSIGNMENT:
+			result += snprintf(buf, buf_size, "+="); break;
+		case TOKEN_MINUS_ASSIGNMENT:
+			result += snprintf(buf, buf_size, "-="); break;
+		case TOKEN_MULTIPLY_ASSIGNMENT:
+			result += snprintf(buf, buf_size, "*="); break;
+		case TOKEN_DIVIDE_ASSIGNMENT:
+			result += snprintf(buf, buf_size, "/="); break;
+		case TOKEN_REMAINDER_ASSIGNMENT:
+			result += snprintf(buf, buf_size, "%%="); break;
+		case TOKEN_POW_ASSIGNMENT:
+			result += snprintf(buf, buf_size, "**="); break;
 		case TOKEN_MULTIPLY:
 			result += snprintf(buf, buf_size, "*"); break;
 		case TOKEN_DIVIDE:
@@ -456,6 +560,8 @@ ssize_t get_token_c(char* buf, size_t buf_size, token_t token) {
 			result += snprintf(buf, buf_size, "%i", token.val); break;
 		case TOKEN_WORD:
 			result += snprintf(buf, buf_size, "%s", token.word); break;
+		case TOKEN_STRING:
+			result += snprintf(buf, buf_size, "\"%s\"", token.word); break;
 		case TOKEN_LEFT_PARENT:
 			result += snprintf(buf, buf_size, "("); break;
 		case TOKEN_RIGHT_PARENT:

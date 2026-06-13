@@ -9,6 +9,72 @@
 #include <ctype.h>
 #include <string.h>
 
+const char *get_interned(interneds_t *interneds, const char *str) {
+	if (!interneds || !str) return nullptr;
+
+	if (!interneds->interneds) {
+		interneds->cnt = 0;
+
+		interneds->size = FILENAMES_ALLOC_STEP;
+
+		interneds->interneds = calloc(interneds->size, sizeof(char*));
+	}
+
+	if (interneds->cnt >= interneds->size) {
+		size_t new_size = MAX(interneds->size, (size_t)align_up(interneds->cnt + 1, FILENAMES_ALLOC_STEP));
+
+		interneds->interneds = recalloc(interneds->interneds, interneds->size * sizeof(char*), new_size * sizeof(char*));
+
+		interneds->size = new_size;
+	}
+
+	ssize_t index = -1;
+
+	for (size_t i = 0; i < interneds->cnt; i++) {
+		char *name = interneds->interneds[i];
+
+		if (!name) break;
+
+		if (name == str || 
+			strcmp(name, str) == 0) {
+			index = i; break;
+		}
+	}
+
+	if (index != -1) {
+		return interneds->interneds[index];
+	}
+
+	char **result = interneds->interneds + interneds->cnt;
+
+	*result = strdup(str);
+
+	interneds->cnt++;
+
+	return *result;
+}
+
+void free_interneds(interneds_t *interneds) {
+	for (size_t i = 0; i < interneds->cnt; i++) {
+		if (interneds->interneds[i]) free(interneds->interneds[i]);
+		interneds->interneds[i] = nullptr;
+	}
+
+	free(interneds->interneds); interneds->interneds = nullptr;
+}
+
+void *recalloc(void *ptr, size_t old_size, size_t new_size) {
+	char *result = realloc(ptr, new_size);
+
+	printf("recalloc(%p, %zu, %zu) = %p;\n\r", ptr, old_size, new_size, result);
+
+	if (result && new_size > old_size) {
+		memset(result + old_size, 0, new_size - old_size);
+	}
+
+	return result;
+}
+
 size_t skip_spaces(const char* text) {
 	size_t index = 0;
 
@@ -20,13 +86,16 @@ size_t skip_spaces(const char* text) {
 }
 
 void count_spaces(size_t* column, size_t* row, const char* text) {
-	while (*text && strchr(" \t\n", *text) != nullptr) {
+	while (*text && strchr(" \t\n\r", *text) != nullptr) {
 		switch (*text) {
 			case ' ':
 				if (column) *column += 1;
 				break;
 			case '\t':
 				if (column) *column += 1;
+				break;
+			case '\r':
+				if (column) *column = 0;
 				break;
 			case '\n':
 				if (column) *column = 0;
@@ -36,6 +105,26 @@ void count_spaces(size_t* column, size_t* row, const char* text) {
 
 		text++;
 	}
+		
+	printf("%zu:%zu\n\r", *column, *row);
+}
+
+size_t skip_newlines(const char *_text, size_t _count) {
+	const char *text = _text;
+	
+	printf("_count = %zu\n\r", _count);
+
+	size_t count = 0;
+
+	while (*text && count < _count) {
+		if (*text == '\n') {
+			count++;
+		}
+
+		text++;
+	}
+
+	return text - _text;
 }
 
 int64 align_up(int64 num, int64 align) {
@@ -179,7 +268,7 @@ const char* get_radix_prefix(radix_e radix) {
 	return nullptr;
 }
 
-const char* get_radix_alphbaet(radix_e radix) {
+const char* get_radix_alphabet(radix_e radix) {
 	switch (radix) {
 		case RADIX_BINARY: 		return "01";
 		case RADIX_OCTAL: 		return "01234567";
@@ -246,13 +335,22 @@ parse_num_err_e parse_num(uint64* result, const char* str, const char** endptr) 
 		base = 8; str += 1;
 	}
 
-	size_t expected_len = strcspn(str, ALPHABET);
+	size_t expected_len = strcspn(str, SPACES ALPHABET);
 
 	const char* expected_endc = str + expected_len;
 
 	const char* src_str = str;
 
 	uint64 number = strtoull(str, (char**)(&str), base);
+
+	if (*str == 'e' || (base == 16 && *str == 'p')) {
+		str++;
+
+		uint64 exp = 0;
+		err = parse_num(&exp, str, &str);
+
+		number *= powi(base, exp);
+	}
 
 	if (str != expected_endc) {
 		radix_e radix = RADIX_UNKNOWN;
@@ -288,22 +386,65 @@ parse_num_err_e parse_num(uint64* result, const char* str, const char** endptr) 
 		return PARSER_NUM_ERR_INVALID_LITERAL;
 	}
 
-	if (*str == 'e') {
-		str++;
-		
-		printf("\"%s\"\n\r", str);
-
-		uint64 exp = 0;
-		parse_num(&exp, str, &str);
-
-		number *= powi(base, exp);
-	}
-
 	if (endptr) *endptr = str;
 
 	if (result) *result = number;
 
 	return err;
+}
+
+size_t parse_str(char *buf, size_t buf_size, const char* str, const char** endptr) {
+	if (*str != '\"') {
+		if (endptr) *endptr = str;
+		
+		return 0;
+	}
+
+	str++;
+
+	size_t length = 0;
+
+	while (*str) {
+		if (*str == '\\' && str[1] != 0) {
+			str++;
+
+			char c = 0;
+
+			switch (*str) {
+				case 'n':
+					c = '\n'; break;
+				case 'r':
+					c = '\r'; break;
+				case '\"':
+					c = '\"'; break;
+			}
+
+			if (buf) buf[length] = c;
+
+			length += 1; str += 2;
+		}
+
+		else if (*str == '\"') {
+			str++;
+
+			break;
+		}
+
+		else {
+			if (buf) buf[length] = *str;
+
+			length += 1; str++;
+		}
+	}
+
+	if (*str != '\"') {
+	}
+
+	if (buf) buf[length] = 0;
+
+	if (endptr) *endptr = str;
+
+	return length;
 }
 
 bool isnum(char c) {

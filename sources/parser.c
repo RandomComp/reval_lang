@@ -1,5 +1,6 @@
 #include "types.h"
 #include "lexer.h"
+#include "utils.h"
 #include "parser.h"
 
 #include <malloc.h>
@@ -16,100 +17,143 @@ static bool token_is_op(tokens_kind_e kind) {
 	return kind >= TOKEN_PLUS && kind <= TOKEN_WORD;
 }
 
+expression_t* new_expression(interneds_t *filenames, const char *filename, expression_t *left, tokens_kind_e op, expression_t *right) {
+	expression_t *result = calloc(1, sizeof(expression_t));
+
+	result->filename = get_interned(filenames, filename);
+
+	result->left = left;
+	result->op = op;
+	result->right = right;
+
+	return result;
+}
+
 // TODO: Переписать для таблицы с операторами, их типа (унарные/бинарные/тернарные) и его приорететом с ассоциативностью (левая или правая)
 
-errors_t parse_semicolon(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
+errors_t parse_semicolon(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
 	if (tokens->kind == TOKEN_EOF) {
-		if (endptr) *endptr = tokens;
-		
 		return errs;
 	}
+
+	expression_t* result = nullptr;
 
 	expression_t* left = nullptr;
 
 	size_t column = tokens->column; size_t row = tokens->row;
 	
-	errs = parse_assignment(errs, &left, tokens, &tokens);
+	errs = parse_assignment(errs, &left, filenames, tokens, &tokens);
 
-	if (!left) return errs;
+	if (!left) goto exit;
 
 	if (tokens->kind != TOKEN_SEMICOLON) {
-		left->column = column; left->row = row;
-		left->end_column = tokens->end_column; left->end_row = tokens->end_row;
-		
-		if (endptr) *endptr = tokens;
-		
-		if (_result) *_result = left;
-		
-		return errs;
+		result = left;
+
+		goto exit;
 	}
 
 	tokens++;
 
-	expression_t* result = calloc(1, sizeof(expression_t));
+	result = new_expression(filenames, tokens->filename, left, TOKEN_SEMICOLON, nullptr);
 
 	result->column = column; result->row = row;
-	result->op = TOKEN_SEMICOLON;
-	result->left = left;
 
-	errs = parse_semicolon(errs, &result->right, tokens, &tokens);
-
-	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
-
-	if (endptr) *endptr = tokens;
-	
-	if (_result) *_result = result;
-	
-	return errs;
-}
-
-errors_t parse_assignment(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
-	if (tokens[1].kind != TOKEN_ASSIGNMENT) {
-		return parse_ternary(errs, _result, tokens, endptr);
-	}
-
-	if (tokens[0].kind != TOKEN_WORD) {
-		char buf[64] = { 0 };
-		get_token_name(buf, 64, tokens[0]);
-
-		return emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, tokens[0].column, tokens[0].row, tokens[1].column, tokens[1].row, nullptr, nullptr, "expected %s got %s", get_token_kind_name(TOKEN_WORD), buf);
-	}
-
-	const char* var_name = tokens[0].word;
-
-	tokens += 2; // WORD + ASSIGNMENT
-
-	expression_t* right = nullptr;
-
-	errs = parse_assignment(errs, &right, tokens, &tokens);
-
-	if (!right) {
-		goto exit;
-	}
-
-	expression_t* result = calloc(1, sizeof(expression_t));
-
-	result->word = strdup(var_name);
-	result->op = TOKEN_ASSIGNMENT;
-	result->right = right;
-	
-	if (_result) *_result = result;
+	errs = parse_semicolon(errs, &result->right, filenames, tokens, &tokens);
 
 	exit:
 
 	if (endptr) *endptr = tokens;
+
+	if (!result) return errs;
+
+	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = result;
+	}
+
+	else {
+		free_expresion(result);
+	}
 	
 	return errs;
 }
 
-errors_t parse_ternary(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
+errors_t parse_assignment(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
+	if (tokens[1].kind != TOKEN_ASSIGNMENT &&
+		tokens[1].kind != TOKEN_PLUS_ASSIGNMENT &&
+		tokens[1].kind != TOKEN_MINUS_ASSIGNMENT &&
+		tokens[1].kind != TOKEN_MULTIPLY_ASSIGNMENT &&
+		tokens[1].kind != TOKEN_DIVIDE_ASSIGNMENT &&
+		tokens[1].kind != TOKEN_REMAINDER_ASSIGNMENT &&
+		tokens[1].kind != TOKEN_POW_ASSIGNMENT) {
+		errs = parse_ternary(errs, _result, filenames, tokens, endptr);
+
+		return errs;
+	}
+
+	size_t column = tokens->column; size_t row = tokens->row;
+	
+	if (tokens[0].kind != TOKEN_WORD) {
+		char buf[64] = { 0 };
+		get_token_name(buf, 64, tokens[0]);
+
+		errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, tokens->filename, column, row, tokens[1].column, tokens[1].row, nullptr, nullptr, "expected %s got %s", get_token_kind_name(TOKEN_WORD), buf);
+
+		return errs;
+	}
+
+	expression_t* result = nullptr;
+
+	const char* var_name = tokens[0].word;
+
+	tokens += 1; // WORD
+
+	tokens_kind_e assigment_type = tokens->kind;
+
+	tokens += 1;
+
+	expression_t* right = nullptr;
+
+	errs = parse_assignment(errs, &right, filenames, tokens, &tokens);
+
+	if (!right) goto exit;
+
+	result = new_expression(filenames, tokens->filename, nullptr, assigment_type, right);
+
+	result->word = get_interned(filenames, var_name);
+
+	result->column = column; result->row = row;
+
+	exit:
+
+	if (endptr) *endptr = tokens;
+
+	if (!result) return errs;
+	
+	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = result;
+	}
+
+	else {
+		free_expresion(result); result = nullptr;
+	}
+
+	return errs;
+}
+
+errors_t parse_ternary(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
+	expression_t* result = nullptr;
+	
 	expression_t* left = nullptr;
 	
 	size_t column = tokens->column; size_t row = tokens->row;
 	
-	errs = parse_logical(errs, &left, tokens, &tokens);
+	errs = parse_logical(errs, &left, filenames, tokens, &tokens);
 
-	if (!left) return errs;
+	if (!left) goto exit;
 		
 	// if (err > 0) {
 	// 	free_expresion(left);
@@ -120,27 +164,18 @@ errors_t parse_ternary(errors_t errs, expression_t **_result, const token_t* tok
 	// }
 
 	if (tokens->kind != TOKEN_QUESTION_MARK) {
-		left->column = column; left->row = row;
-		left->end_column = tokens->end_column; left->end_row = tokens->end_row;
-		
-		if (endptr) *endptr = tokens;
+		result = left;
 
-		if (_result) *_result = left;
-
-		return errs;
+		goto exit;
 	}
 
-	expression_t* result = calloc(1, sizeof(expression_t));
+	result = new_expression(filenames, tokens->filename, left, tokens->kind, nullptr);
 
 	result->column = column; result->row = row;
 
-	result->op = tokens->kind;
-
-	result->left = left;
-
 	tokens++;
 
-	errs = parse_logical(errs, &result->center, tokens, &tokens);
+	errs = parse_logical(errs, &result->center, filenames, tokens, &tokens);
 
 	// if (err > 0) {
 	// 	free_expresion(cur);
@@ -151,14 +186,14 @@ errors_t parse_ternary(errors_t errs, expression_t **_result, const token_t* tok
 	// }
 
 	if (tokens->kind != TOKEN_COLON) {
-		errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, tokens->column, tokens->row, tokens->end_column, tokens->end_row, nullptr, nullptr, "expected %s, got %s", get_token_kind_name(TOKEN_COLON), get_token_kind_name(tokens->kind));
+		errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, tokens->filename, tokens->column, tokens->row, tokens->end_column, tokens->end_row, nullptr, nullptr, "expected %s, got %s", get_token_kind_name(TOKEN_COLON), get_token_kind_name(tokens->kind));
 
-		return errs;
+		goto exit;
 	}
 
 	tokens++;
 
-	errs = parse_ternary(errs, &result->right, tokens, &tokens);
+	errs = parse_ternary(errs, &result->right, filenames, tokens, &tokens);
 		
 	// if (err > 0) {
 	// 	free_expresion(cur);
@@ -168,23 +203,35 @@ errors_t parse_ternary(errors_t errs, expression_t **_result, const token_t* tok
 	// 	return err;
 	// }
 
-	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+	exit:
 
 	if (endptr) *endptr = tokens;
 
-	if (_result) *_result = result;
+	if (!result) return errs;
+
+	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = result;
+	}
+
+	else {
+		free_expresion(result); result = nullptr;
+	}
 
 	return errs;
 }
 
-errors_t parse_logical(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
+errors_t parse_logical(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
+	expression_t* result = nullptr;
+	
 	expression_t* left = nullptr;
 	
 	size_t column = tokens->column; size_t row = tokens->row;
 		
-	errs = parse_compare(errs, &left, tokens, &tokens);
+	errs = parse_compare(errs, &left, filenames, tokens, &tokens);
 
-	if (!left) return errs;
+	if (!left) goto exit;
 		
 	// if (err > 0) {
 	// 	free_expresion(left);
@@ -196,27 +243,18 @@ errors_t parse_logical(errors_t errs, expression_t **_result, const token_t* tok
 
 	if (tokens->kind != TOKEN_LOGIC_AND &&
 		tokens->kind != TOKEN_LOGIC_OR) {
-		left->column = column; left->row = row;
-		left->end_column = tokens->end_column; left->end_row = tokens->end_row;
-
-		if (endptr) *endptr = tokens;
-
-		if (_result) *_result = left;
-
-		return errs;
+		result = left;
+		
+		goto exit;
 	}
 
-	expression_t* result = calloc(1, sizeof(expression_t));
+	result = new_expression(filenames, tokens->filename, left, tokens->kind, nullptr);
 
 	result->column = column; result->row = row;
 
-	result->op = tokens->kind;
-
 	tokens++;
-	
-	result->left = left;
 		
-	errs = parse_logical(errs, &result->right, tokens, &tokens);
+	errs = parse_logical(errs, &result->right, filenames, tokens, &tokens);
 		
 	// if (err > 0) {
 	// 	free_expresion(result);
@@ -226,23 +264,35 @@ errors_t parse_logical(errors_t errs, expression_t **_result, const token_t* tok
 	// 	return err;
 	// }
 
-	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+	exit:
 
 	if (endptr) *endptr = tokens;
 
-	if (_result) *_result = result;
+	if (!result) return errs;
+
+	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = result;
+	}
+
+	else {
+		free_expresion(result); result = nullptr;
+	}
 
 	return errs;
 }
 
-errors_t parse_compare(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
+errors_t parse_compare(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
+	expression_t* result = nullptr;
+
 	expression_t* left = nullptr;
 	
 	size_t column = tokens->column; size_t row = tokens->row;
 		
-	errs = parse_add(errs, &left, tokens, &tokens);
+	errs = parse_add(errs, &left, filenames, tokens, &tokens);
 
-	if (!left) return errs;
+	if (!left) goto exit;
 		
 	// if (err > 0) {
 	// 	free_expresion(left);
@@ -258,27 +308,18 @@ errors_t parse_compare(errors_t errs, expression_t **_result, const token_t* tok
 		tokens->kind != TOKEN_LESS_EQUALS &&
 		tokens->kind != TOKEN_GREATER &&
 		tokens->kind != TOKEN_LESS) {
-		left->column = column; left->row = row;
-		left->end_column = tokens->end_column; left->end_row = tokens->end_row;
+		result = left;
 
-		if (endptr) *endptr = tokens;
-
-		if (_result) *_result = left;
-
-		return errs;
+		goto exit;
 	}
 
-	expression_t* result = calloc(1, sizeof(expression_t));
+	result = new_expression(filenames, tokens->filename, left, tokens->kind, nullptr);
 
 	result->column = column; result->row = row;
 
-	result->op = tokens->kind;
-
 	tokens++;
-	
-	result->left = left;
 		
-	errs = parse_compare(errs, &result->right, tokens, &tokens);
+	errs = parse_compare(errs, &result->right, filenames, tokens, &tokens);
 		
 	// if (err > 0) {
 	// 	free_expresion(result);
@@ -288,23 +329,35 @@ errors_t parse_compare(errors_t errs, expression_t **_result, const token_t* tok
 	// 	return err;
 	// }
 
-	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+	exit:
 
 	if (endptr) *endptr = tokens;
 
-	if (_result) *_result = result;
+	if (!result) return errs;
+
+	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = result;
+	}
+
+	else {
+		free_expresion(result); result = nullptr;
+	}
 
 	return errs;
 }
 
-errors_t parse_add(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
+errors_t parse_add(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
+	expression_t* cur = nullptr;
+
 	expression_t* left = nullptr;
 	
 	size_t column = tokens->column; size_t row = tokens->row;
 		
-	errs = parse_mult(errs, &left, tokens, &tokens);
+	errs = parse_mult(errs, &left, filenames, tokens, &tokens);
 
-	if (!left) return errs;
+	if (!left) goto exit;
 		
 	// if (err > 0) {
 	// 	free_expresion(left);
@@ -316,28 +369,19 @@ errors_t parse_add(errors_t errs, expression_t **_result, const token_t* tokens,
 
 	if (tokens->kind != TOKEN_PLUS && 
 		tokens->kind != TOKEN_MINUS) {
-		left->column = column; left->row = row;
-		left->end_column = tokens->end_column; left->end_row = tokens->end_row;
+		cur = left;
 
-		if (endptr) *endptr = tokens;
-
-		if (_result) *_result = left;
-
-		return errs;
+		goto exit;
 	}
 
-	expression_t* cur = calloc(1, sizeof(expression_t));
+	cur = new_expression(filenames, tokens->filename, left, tokens->kind, nullptr);
 
 	cur->column = column; cur->row = row;
-
-	cur->op = tokens->kind;
-
-	cur->left = left;
 
 	while (tokens->kind == TOKEN_PLUS || tokens->kind == TOKEN_MINUS) {
 		tokens++;
 
-		errs = parse_mult(errs, &cur->right, tokens, &tokens);
+		errs = parse_mult(errs, &cur->right, filenames, tokens, &tokens);
 
 		// if (err > 0) {
 		// 	free_expresion(cur);
@@ -349,33 +393,39 @@ errors_t parse_add(errors_t errs, expression_t **_result, const token_t* tokens,
 
 		if (tokens->kind != TOKEN_EOF && 
 			(tokens->kind == TOKEN_PLUS || tokens->kind == TOKEN_MINUS)) {
-			expression_t* temp = cur;
-
-			cur = calloc(1, sizeof(expression_t));
-
-			cur->op = tokens->kind;
-
-			cur->left = temp;
+			cur = new_expression(filenames, tokens->filename, cur, tokens->kind, nullptr);
 		}
 	}
 
-	cur->end_column = tokens->end_column; cur->end_row = tokens->end_row;
+	exit:
 
 	if (endptr) *endptr = tokens;
 
-	if (_result) *_result = cur;
+	if (!cur) return errs;
+
+	cur->end_column = tokens->end_column; cur->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = cur;
+	}
+
+	else {
+		free_expresion(cur); cur = nullptr;
+	}
 
 	return errs;
 }
 
-errors_t parse_mult(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
+errors_t parse_mult(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
+	expression_t* cur = nullptr;
+
 	expression_t* left = nullptr;
 	
 	size_t column = tokens->column; size_t row = tokens->row;
 		
-	errs = parse_pow(errs, &left, tokens, &tokens);
+	errs = parse_pow(errs, &left, filenames, tokens, &tokens);
 
-	if (!left) return errs;
+	if (!left) goto exit;
 
 	// if (err > 0) {
 	// 	free_expresion(left);
@@ -388,44 +438,29 @@ errors_t parse_mult(errors_t errs, expression_t **_result, const token_t* tokens
 	if (tokens->kind != TOKEN_MULTIPLY &&
 		tokens->kind != TOKEN_DIVIDE &&
 		tokens->kind != TOKEN_REMAINDER) {
-		left->column = column; left->row = row;
-		left->end_column = tokens->end_column; left->end_row = tokens->end_row;
+		cur = left;
 
-		if (endptr) *endptr = tokens;
-
-		if (_result) *_result = left;
-
-		return errs;
+		goto exit;
 	}
 
-	expression_t* cur = calloc(1, sizeof(expression_t));
+	cur = new_expression(filenames, tokens->filename, left, tokens->kind, nullptr);
 
 	cur->column = column; cur->row = row;
-
-	cur->op = tokens->kind;
-	
-	cur->left = left;
 		
 	while (tokens->kind == TOKEN_MULTIPLY ||
 		tokens->kind == TOKEN_DIVIDE ||
 		tokens->kind == TOKEN_REMAINDER) {
 		tokens++;
 
-		errs = parse_pow(errs, &cur->right, tokens, &tokens);
+		errs = parse_pow(errs, &cur->right, filenames, tokens, &tokens);
 
-		if (!cur->right) return errs;
+		if (!cur->right) goto exit;
 
 		if (tokens->kind != TOKEN_EOF && 
 			(tokens->kind == TOKEN_MULTIPLY ||
 			tokens->kind == TOKEN_DIVIDE ||
 			tokens->kind == TOKEN_REMAINDER)) {
-			expression_t* temp = cur;
-
-			cur = calloc(1, sizeof(expression_t));
-
-			cur->op = tokens->kind;
-
-			cur->left = temp;
+			cur = new_expression(filenames, tokens->filename, cur, tokens->kind, nullptr);
 		}
 	}
 
@@ -435,27 +470,39 @@ errors_t parse_mult(errors_t errs, expression_t **_result, const token_t* tokens
 			cur->right->op == TOKEN_NUMBER &&
 			cur->right->val == 0) {
 
-			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_POSSIBLE_UB, ERROR_LEVEL_WARN, column, row, tokens->column - column, tokens->row - row, nullptr, nullptr, "%s by zero is ambigious", cur->op == TOKEN_DIVIDE ? "division" : "modulo");
+			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_POSSIBLE_UB, ERROR_LEVEL_WARN, tokens->filename, column, row, tokens->end_column, tokens->end_row, nullptr, nullptr, "%s by zero is ambigious", cur->op == TOKEN_DIVIDE ? "division" : "modulo");
 		}
 	}
-	
-	cur->end_column = tokens->column - column; cur->end_row = tokens->row - row;
 
+	exit:
+	
 	if (endptr) *endptr = tokens;
 
-	if (_result) *_result = cur;
+	if (!cur) return errs;
+	
+	cur->end_column = tokens->end_column; cur->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = cur;
+	}
+
+	else {
+		free_expresion(cur); cur = nullptr;
+	}
 
 	return errs;
 }
 
-errors_t parse_pow(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
+errors_t parse_pow(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
+	expression_t* result = nullptr;
+
 	expression_t* left = nullptr;
 	
 	size_t column = tokens->column; size_t row = tokens->row;
 		
-	errs = parse_unar(errs, &left, tokens, &tokens);
+	errs = parse_unar(errs, &left, filenames, tokens, &tokens);
 
-	if (!left) return errs;
+	if (!left) goto exit;
 
 	// if (err > 0) {
 	// 	free_expresion(left);
@@ -466,27 +513,18 @@ errors_t parse_pow(errors_t errs, expression_t **_result, const token_t* tokens,
 	// }
 
 	if (tokens->kind != TOKEN_POW) {
-		left->column = column; left->row = row;
-		left->end_column = tokens->end_column; left->end_row = tokens->end_row;
+		result = left;
 
-		if (endptr) *endptr = tokens;
-
-		if (_result) *_result = left;
-
-		return errs;
+		goto exit;
 	}
-
-	expression_t* result = calloc(1, sizeof(expression_t));
+	
+	result = new_expression(filenames, tokens->filename, left, TOKEN_POW, nullptr);
 
 	result->column = column; result->row = row;
 
-	result->op = TOKEN_POW;
-
 	tokens++;
-	
-	result->left = left;
 		
-	errs = parse_pow(errs, &result->right, tokens, &tokens);
+	errs = parse_pow(errs, &result->right, filenames, tokens, &tokens);
 	
 	// if (err > 0) {
 	// 	free_expresion(result);
@@ -502,22 +540,32 @@ errors_t parse_pow(errors_t errs, expression_t **_result, const token_t* tokens,
 		if (result->right && 
 			result->right->op == TOKEN_NUMBER &&
 			result->right->val == 0) {
-			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_POSSIBLE_UB, ERROR_LEVEL_WARN, column, row, tokens->column - column, tokens->row  - row, nullptr, nullptr, "0 ** 0 is ambigious (any number in 0 power equals 1, but zero in any number power equals 0)");
+			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_POSSIBLE_UB, ERROR_LEVEL_WARN, tokens->filename, column, row, tokens->end_column, tokens->row  - row, nullptr, nullptr, "0 ** 0 is ambigious (any number in 0 power equals 1, but zero in any number power equals 0)");
 		}
 	}
-	
-	result->end_column = tokens->column - column; result->end_row = tokens->row - row;
+
+	exit:
 
 	if (endptr) *endptr = tokens;
 
-	if (_result) *_result = result;
+	if (!result) return errs;
+	
+	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = result;
+	}
+
+	else {
+		free_expresion(result); result = nullptr;
+	}
 
 	return errs;
 }
 
-errors_t parse_unar(errors_t errs, expression_t **_result, const token_t* tokens, const token_t** endptr) {
+errors_t parse_unar(errors_t errs, expression_t **_result, interneds_t *filenames, const token_t* tokens, const token_t** endptr) {
 	if (tokens->kind == TOKEN_EOF) {
-		errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_EOF, ERROR_LEVEL_ERROR, tokens->column, tokens->row, tokens->end_column, tokens->end_row, nullptr, nullptr, "expected expression or number, got EOF");
+		errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_EOF, ERROR_LEVEL_ERROR, tokens->filename, tokens->column, tokens->row, tokens->end_column, tokens->end_row, nullptr, nullptr, "expected expression or number, got EOF");
 
 		return errs;
 	}
@@ -526,36 +574,86 @@ errors_t parse_unar(errors_t errs, expression_t **_result, const token_t* tokens
 
 	size_t column = tokens->column, row = tokens->row;
 
+	bool increment = false, decrement = false;
+
+	// в оптимизаторе когда expr->unary_op == TOKEN_PREINCREMENT/TOKEN_POSTINCREMENT и в expr->right есть переменная из expr->left выдавать предупреждение
+
+	if (tokens->kind == TOKEN_INCREMENT) {
+		tokens++;
+
+		increment = true;
+	}
+
+	else if (tokens->kind == TOKEN_DECREMENT) {
+		tokens++;
+
+		decrement = true;
+	}
+
 	if (tokens->kind == TOKEN_NUMBER) {
-		result = calloc(1, sizeof(expression_t));
+		result = new_expression(filenames, tokens->filename, nullptr, TOKEN_NUMBER, nullptr);
 	
 		result->column = column; result->row = row;
 
 		result->val = tokens->val;
-		result->op = TOKEN_NUMBER;
 
 		tokens++;
 
-		goto end;
+		if (increment) {
+			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INCOMPATIBLE_OPERATOR_TYPE, ERROR_LEVEL_ERROR, tokens->filename, column, row, tokens->column, tokens->row, nullptr, nullptr, "incorrect combination of operator (++) and operand");
+		}
+
+		else if (decrement) {
+			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INCOMPATIBLE_OPERATOR_TYPE, ERROR_LEVEL_ERROR, tokens->filename, column, row, tokens->column, tokens->row, nullptr, nullptr, "incorrect combination of operator (--) and operand");
+		}
+		
+		if (tokens->kind == TOKEN_INCREMENT) {
+			tokens++;
+
+			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INCOMPATIBLE_OPERATOR_TYPE, ERROR_LEVEL_ERROR, tokens->filename, column, row, tokens->column, tokens->row, nullptr, nullptr, "incorrect combination of operator (++) and operand");
+		}
+
+		else if (tokens->kind == TOKEN_DECREMENT) {
+			tokens++;
+
+			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INCOMPATIBLE_OPERATOR_TYPE, ERROR_LEVEL_ERROR, tokens->filename, column, row, tokens->column, tokens->row, nullptr, nullptr, "incorrect combination of operator (--) and operand");
+		}
 	}
 
 	else if (tokens->kind == TOKEN_WORD) {
-		result = calloc(1, sizeof(expression_t));
+		result = new_expression(filenames, tokens->filename, nullptr, TOKEN_WORD, nullptr);
 	
 		result->column = column; result->row = row;
 
-		result->word = strdup(tokens->word);
-		result->op = TOKEN_WORD;
+		result->word = get_interned(filenames, tokens->word);
 
 		tokens++;
 
-		goto end;
+		if (increment) {
+			result->unary_op = TOKEN_PREINCREMENT;
+		}
+
+		else if (decrement) {
+			result->unary_op = TOKEN_PREDECREMENT;
+		}
+		
+		if (tokens->kind == TOKEN_INCREMENT) {
+			tokens++;
+
+			result->unary_op = TOKEN_POSTINCREMENT;
+		}
+
+		else if (tokens->kind == TOKEN_DECREMENT) {
+			tokens++;
+
+			result->unary_op = TOKEN_POSTDECREMENT;
+		}
 	}
 
 	else if (tokens->kind == TOKEN_LEFT_PARENT) {
 		tokens++;
 
-		errs = parse_semicolon(errs, &result, tokens, &tokens);
+		errs = parse_semicolon(errs, &result, filenames, tokens, &tokens);
 
 		if (result) {
 			result->column = column; result->row = row;
@@ -566,7 +664,7 @@ errors_t parse_unar(errors_t errs, expression_t **_result, const token_t* tokens
 		}
 
 		else {
-			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_UNCLOSED_PARENT, ERROR_LEVEL_ERROR, tokens->column, tokens->row, 1, 0, nullptr, nullptr, "'(' wasn't closed here");
+			errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_UNCLOSED_PARENT, ERROR_LEVEL_ERROR, tokens->filename, tokens->column, tokens->row, 1, 0, ")", nullptr, "'(' wasn't closed here");
 		}
 		
 		// if (err > 0) {
@@ -576,20 +674,18 @@ errors_t parse_unar(errors_t errs, expression_t **_result, const token_t* tokens
 
 		// 	return errs;
 		// }
-
-		goto end;
 	}
 
 	else if (tokens->kind == TOKEN_PLUS) {
 		tokens++;
 		
-		errs = parse_unar(errs, &result, tokens, &tokens);
+		errs = parse_unar(errs, &result, filenames, tokens, &tokens);
 	}
 
 	else if (tokens->kind == TOKEN_MINUS ||
 		tokens->kind == TOKEN_EXCLAMATION_MARK ||
 		tokens->kind == TOKEN_TILDE) {
-		result = calloc(1, sizeof(expression_t));
+		result = new_expression(filenames, tokens->filename, nullptr, TOKEN_PARSER_UNARY_ONLY, nullptr);
 	
 		result->column = column; result->row = row;
 
@@ -597,9 +693,7 @@ errors_t parse_unar(errors_t errs, expression_t **_result, const token_t* tokens
 
 		tokens++;
 
-		errs = parse_unar(errs, &result->left, tokens, &tokens);
-
-		result->op = TOKEN_PARSER_UNARY_ONLY;
+		errs = parse_unar(errs, &result->left, filenames, tokens, &tokens);
 	}
 
 	else {
@@ -608,30 +702,36 @@ errors_t parse_unar(errors_t errs, expression_t **_result, const token_t* tokens
 		char buf[64] = { 0 };
 		get_token_name(buf, 64, *tokens);
 
-		errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, tokens->column, tokens->row, tokens->end_column, tokens->end_row, nullptr, nullptr, "expected expression or number, got %s", buf);
+		errs = emit_error(errs, SUBSYSTEM_PARSER, ERROR_PARSER_INVALID_SYNTAX, ERROR_LEVEL_ERROR, tokens->filename, tokens->column, tokens->row, tokens->end_column, tokens->end_row, nullptr, nullptr, "expected expression or number, got %s", buf);
 
-		return errs;
+		goto exit;
 	}
 
-	end:
-
-	if (!result) return errs;
-
-	result->end_column = tokens->column - column; result->end_row = tokens->row - row;
+	exit:
 
 	if (endptr) *endptr = tokens;
 
-	if (_result) *_result = result;
+	if (!result) return errs;
+
+	result->end_column = tokens->end_column; result->end_row = tokens->end_row;
+
+	if (_result) {
+		*_result = result;
+	}
+
+	else {
+		free_expresion(result); result = nullptr;
+	}
 
 	return errs;
 }
 
-size_t view_expresion(char* _buf, size_t buf_size, expression_t* expr) {
+ssize_t view_expresion(char* _buf, ssize_t buf_size, expression_t* expr) {
 	if (_buf && buf_size < 1) return 0;
 
 	char* buf = _buf;
 
-	size_t index = 0;
+	ssize_t index = 0;
 
 	if (!expr) {
 		index += snprintf(buf, buf_size, "(null)");
@@ -649,22 +749,31 @@ size_t view_expresion(char* _buf, size_t buf_size, expression_t* expr) {
 
 	index++;
 
-	if (expr->unary_op == TOKEN_MINUS) {
-		if (buf && index < (buf_size - 1)) buf[index] = '-';
+	typedef struct unary_op_t {
+		tokens_kind_e op; const char* text;
+	} unary_op_t;
 
-		index++;
-	}
+	const unary_op_t pre_unary_ops[] = {
+		{TOKEN_MINUS, "-"},
+		{TOKEN_EXCLAMATION_MARK, "!"},
+		{TOKEN_TILDE, "~"},
+		{TOKEN_PREINCREMENT, "++"},
+		{TOKEN_PREDECREMENT, "--"},
+		{0, 0}
+	};
 
-	else if (expr->unary_op == TOKEN_EXCLAMATION_MARK) {
-		if (buf && index < (buf_size - 1)) buf[index] = '!';
+	const unary_op_t post_unary_ops[] = {
+		{TOKEN_POSTINCREMENT, "++"},
+		{TOKEN_POSTDECREMENT, "--"},
+		{0, 0}
+	};
 
-		index++;
-	}
+	for (size_t i = 0; pre_unary_ops[i].op != 0 && pre_unary_ops[i].text != 0; i++) {
+		if (expr->unary_op == pre_unary_ops[i].op) {
+			index += snprintf(_buf ? (buf + index) : 0, _buf ? (buf_size - index) : 0, "%s", pre_unary_ops[i].text);
 
-	else if (expr->unary_op == TOKEN_TILDE) {
-		if (buf && index < (buf_size - 1)) buf[index] = '~';
-
-		index++;
+			break;
+		}
 	}
 
 	if (expr->op == TOKEN_NUMBER) {
@@ -672,7 +781,12 @@ size_t view_expresion(char* _buf, size_t buf_size, expression_t* expr) {
 	}
 
 	else if (expr->op == TOKEN_WORD ||
-			expr->op == TOKEN_ASSIGNMENT) {
+			expr->op == TOKEN_ASSIGNMENT ||
+			expr->op == TOKEN_PLUS_ASSIGNMENT ||
+			expr->op == TOKEN_MINUS_ASSIGNMENT ||
+			expr->op == TOKEN_MULTIPLY_ASSIGNMENT ||
+			expr->op == TOKEN_DIVIDE_ASSIGNMENT ||
+			expr->op == TOKEN_REMAINDER_ASSIGNMENT) {
 		index += snprintf(_buf ? (buf + index) : 0, _buf ? (buf_size - index) : 0, "%s", expr->word);
 	}
 
@@ -688,6 +802,16 @@ size_t view_expresion(char* _buf, size_t buf_size, expression_t* expr) {
 				index += snprintf(_buf ? (buf + index) : nullptr, _buf ? (buf_size - index) : 0, " - "); break;
 			case TOKEN_POW:
 				index += snprintf(_buf ? (buf + index) : nullptr, _buf ? (buf_size - index) : 0, " ** "); break;
+			case TOKEN_PLUS_ASSIGNMENT:
+				index += snprintf(_buf ? (buf + index) : nullptr, _buf ? (buf_size - index) : 0, " += "); break;
+			case TOKEN_MINUS_ASSIGNMENT:
+				index += snprintf(_buf ? (buf + index) : nullptr, _buf ? (buf_size - index) : 0, " -= "); break;
+			case TOKEN_MULTIPLY_ASSIGNMENT:
+				index += snprintf(_buf ? (buf + index) : nullptr, _buf ? (buf_size - index) : 0, " *= "); break;
+			case TOKEN_DIVIDE_ASSIGNMENT:
+				index += snprintf(_buf ? (buf + index) : nullptr, _buf ? (buf_size - index) : 0, " /= "); break;
+			case TOKEN_REMAINDER_ASSIGNMENT:
+				index += snprintf(_buf ? (buf + index) : nullptr, _buf ? (buf_size - index) : 0, " %%= "); break;
 			case TOKEN_MULTIPLY:
 				index += snprintf(_buf ? (buf + index) : nullptr, _buf ? (buf_size - index) : 0, " * "); break;
 			case TOKEN_DIVIDE:
@@ -736,6 +860,14 @@ size_t view_expresion(char* _buf, size_t buf_size, expression_t* expr) {
 		}
 	}
 
+	for (size_t i = 0; post_unary_ops[i].op != 0 && post_unary_ops[i].text != 0; i++) {
+		if (expr->unary_op == post_unary_ops[i].op) {
+			index += snprintf(_buf ? (buf + index) : 0, _buf ? (buf_size - index) : 0, "%s", post_unary_ops[i].text);
+
+			break;
+		}
+	}
+
 	if (buf && index < (buf_size - 1)) buf[index] = ')';
 
 	index++;
@@ -757,8 +889,9 @@ void free_expresion(expression_t* expr) {
 
 		free_expresion(expr->right); expr->right = nullptr;
 
-		if (expr->word) free(expr->word);
-		expr->word = false;
+		expr->word = nullptr;
+
+		expr->filename = nullptr;
 	}
 
 	expr->op = TOKEN_UNDEFINED;

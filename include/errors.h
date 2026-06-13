@@ -20,22 +20,25 @@ typedef enum error_e {
 	
 	ERROR_OK = 0,
 	
-	// errors:
+	// permanently errors:
 	
 	// lexer
 	ERROR_LEXER_INVALID_SYNTAX,
 	ERROR_LEXER_INVALID_NUMBER,
 	ERROR_LEXER_INVALID_NUMBER_RADIX,
+	ERROR_LEXER_DOUBLE_QUOTE_NEVER_CLOSED,
 	// ERROR_LEXER_MAXIMUM_TOKENS_EXCEEDED,
 
 	// parser
 	ERROR_PARSER_UNCLOSED_PARENT,
 	ERROR_PARSER_INVALID_SYNTAX,
+	ERROR_PARSER_INCOMPATIBLE_OPERATOR_TYPE,
 	ERROR_PARSER_EOF,
 
 	// eval
 	ERROR_EVAL_DIVISION_BY_ZERO,
 	ERROR_EVAL_UNKNOWN_OPERATOR,
+	ERROR_EVAL_UNKNOWN_VARIABLE,
 	ERROR_EVAL_EXPR_ZERO_PTR,
 } error_e;
 
@@ -55,8 +58,9 @@ typedef struct error_t {
 
 	error_level_e level;
 
+	char *filename;
 	ssize_t st_column, st_row;
-	ssize_t columns, rows;
+	ssize_t end_column, end_row;
 } error_t;
 
 #define ERRORS_ALLOC_STEP 4
@@ -69,10 +73,11 @@ typedef struct errors_t {
 } errors_t;
 
 errors_t emit_error(errors_t errors, subsystem_e subsystem, error_e type, error_level_e level, 
+	const char *filename,
 	ssize_t st_column, ssize_t st_row, 
-	ssize_t columns, ssize_t rows,
-	const char* add_hint, const char* del_hint,
-	const char* msg, ...);
+	ssize_t end_column, ssize_t end_row,
+	const char *add_hint, const char *del_hint,
+	const char *msg, ...);
 
 void free_errors(errors_t errs);
 
